@@ -29,6 +29,8 @@ type KeyValue struct {
 	Value string
 }
 
+var workerName string
+
 //
 // use ihash(key) % NReduce to choose the reduce
 // task number for each KeyValue emitted by Map.
@@ -44,9 +46,9 @@ func ihash(key string) int {
 //
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
-	// Your worker implementation here.
 	getTaskResponse := getTask()
 	for true {
+		// retry if get wait notify from master
 		retryCount := 0
 		for retryCount < 100 && getTaskResponse.TaskType == WaitTask {
 			time.Sleep(time.Second)
@@ -60,6 +62,10 @@ func Worker(mapf func(string, string) []KeyValue,
 		}
 		switch getTaskResponse.TaskType {
 		case MapTask:
+			// reuse workername which is already get from master
+			if workerName == "" {
+				workerName = getTaskResponse.WorkerName
+			}
 			strArr := strings.SplitN(getTaskResponse.Filename, strSpliter, 2)
 			filename := strArr[1]
 			index := strArr[0]
@@ -75,11 +81,13 @@ func Worker(mapf func(string, string) []KeyValue,
 				finishTask(MapTask, getTaskResponse.WorkerName, Failed)
 				return
 			}
+			//ready content
 			kva := mapf(filename, string(content))
 			log.Printf("finish map %v", getTaskResponse.Filename)
 			sort.Sort(ByKey(kva))
 			reduceNum := getTaskResponse.ReduceNum
 			intermediateFiles := make([]*os.File, reduceNum)
+			// write file to different reduce files
 			for i := 0; i < reduceNum; i++ {
 				intermediateFileName := fmt.Sprintf("mr%v%v%v%v", strSpliter, index, strSpliter, i)
 				intermediateFiles[i], _ = os.Create(intermediateFileName)
@@ -105,6 +113,9 @@ func Worker(mapf func(string, string) []KeyValue,
 			log.Printf("finish map task %v", getTaskResponse.Filename)
 			finishTask(MapTask, getTaskResponse.WorkerName, Done)
 		case ReduceTask:
+			if workerName == "" {
+				workerName = getTaskResponse.WorkerName
+			}
 			log.Printf("get reduce task %v", getTaskResponse)
 			mapNum := getTaskResponse.MapNum
 			strArr := strings.Split(getTaskResponse.Filename, strSpliter)
@@ -168,13 +179,13 @@ func Worker(mapf func(string, string) []KeyValue,
 		}
 		getTaskResponse = getTask()
 	}
-	// uncomment to send the Example RPC to the master.
-	// CallExample()
-
 }
 
 func getTask() *GetTaskResponse {
 	getTaskRequest := GetTaskRequest{}
+	if workerName != "" {
+		getTaskRequest.WorkerName = workerName
+	}
 	getTaskResponse := GetTaskResponse{}
 	call("Master.GetTask", &getTaskRequest, &getTaskResponse)
 	log.Printf("getTaskResponse: %v", getTaskResponse)

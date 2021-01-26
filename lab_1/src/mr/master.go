@@ -14,17 +14,20 @@ import (
 )
 
 type Master struct {
-	// Your definitions here.
+	// task record.
 	mapTasks           *list.List
 	reduceTasks        *list.List
 	mapRunningTasks    map[string]string
 	reduceRunningTasks map[string]string
-	mapTaskLock        sync.Mutex
-	reduceTaskLock     sync.Mutex
-	mapNum             int
-	reduceNum          int
-	workerIndex        int
-	workerIndexLock    sync.Mutex
+	// lock for task record
+	mapTaskLock    sync.Mutex
+	reduceTaskLock sync.Mutex
+	// task num
+	mapNum    int
+	reduceNum int
+	//worker index record
+	workerIndex     int
+	workerIndexLock sync.Mutex
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -39,9 +42,12 @@ func (m *Master) Example(args *ExampleArgs, reply *ExampleReply) error {
 	return nil
 }
 
+// GetTask get task api, main entrance for worker get map or reduce tasks
+// if finish will return response with task type FinishTask
+// if need worker wait, will return response with task type WaitTask
 func (m *Master) GetTask(request *GetTaskRequest, response *GetTaskResponse) error {
 	log.Println("enter get task!")
-	filename, workerName := m.getMapTask()
+	filename, workerName := m.getMapTask(request.WorkerName)
 	log.Printf("get map task, filename is %v!", filename)
 	if filename != "" {
 		response.TaskType = MapTask
@@ -52,12 +58,13 @@ func (m *Master) GetTask(request *GetTaskRequest, response *GetTaskResponse) err
 		go m.waitTaskFinish(workerName, MapTask)
 		return nil
 	} else {
+		// need to wait all the map task finish before start reduce task
 		if !m.mapTaskFinish() {
 			response.TaskType = WaitTask
 			return nil
 		}
 	}
-	filename, workerName = m.getReduceTask()
+	filename, workerName = m.getReduceTask(request.WorkerName)
 	log.Printf("get reduce task, filename is %v!", filename)
 	if filename != "" {
 		response.TaskType = ReduceTask
@@ -74,6 +81,8 @@ func (m *Master) GetTask(request *GetTaskRequest, response *GetTaskResponse) err
 	return nil
 }
 
+// FinishTask finish task notify api for worker.
+// worker will send message to this api when task finish.
 func (m *Master) FinishTask(request *TaskFinishRequest, response *TaskFinishResponse) error {
 	if request.TaskType == MapTask {
 		m.mapTaskLock.Lock()
@@ -93,6 +102,7 @@ func (m *Master) FinishTask(request *TaskFinishRequest, response *TaskFinishResp
 	}
 }
 
+// additional check loop to make sure work will finish in less than 10 second
 func (m *Master) waitTaskFinish(workerName string, taskType TaskType) {
 	time.Sleep(10 * time.Second)
 	if taskType == MapTask {
@@ -114,23 +124,28 @@ func (m *Master) waitTaskFinish(workerName string, taskType TaskType) {
 	}
 }
 
-func (m *Master) getMapTask() (string, string) {
+func (m *Master) getMapTask(workerName string) (string, string) {
 	var filename string
-	var workerName string
+	var newWorkerName string
 	m.mapTaskLock.Lock()
 	if m.mapTasks.Len() > 0 {
 		firstEle := m.mapTasks.Front()
 		filename = firstEle.Value.(string)
 		m.mapTasks.Remove(firstEle)
-		workerName = m.getWorkerName()
-		m.mapRunningTasks[workerName] = filename
+		if workerName == "" {
+			newWorkerName = m.getWorkerName()
+		} else {
+			newWorkerName = workerName
+		}
+		m.mapRunningTasks[newWorkerName] = filename
 		log.Printf("current mapRunningTask is %v", m.mapRunningTasks)
 	}
 	m.mapTaskLock.Unlock()
-	log.Printf("get map task %v for %v", filename, workerName)
-	return filename, workerName
+	log.Printf("get map task %v for %v", filename, newWorkerName)
+	return filename, newWorkerName
 }
 
+// check if map task finish
 func (m *Master) mapTaskFinish() bool {
 	ret := false
 	m.mapTaskLock.Lock()
@@ -141,6 +156,7 @@ func (m *Master) mapTaskFinish() bool {
 	return ret
 }
 
+//return map task from running map to unfinished list, when task failed.
 func (m *Master) returnMapTask(workerName string) {
 
 	filename := m.mapRunningTasks[workerName]
@@ -149,29 +165,33 @@ func (m *Master) returnMapTask(workerName string) {
 
 }
 
-func (m *Master) getReduceTask() (string, string) {
+func (m *Master) getReduceTask(workerName string) (string, string) {
 	var filename string
-	var workerName string
+	var newWorkerName string
 	m.reduceTaskLock.Lock()
 	if m.reduceTasks.Len() > 0 {
 		firstEle := m.reduceTasks.Front()
 		filename = firstEle.Value.(string)
 		m.reduceTasks.Remove(firstEle)
-		workerName = m.getWorkerName()
-		m.reduceRunningTasks[workerName] = filename
+		if workerName == "" {
+			newWorkerName = m.getWorkerName()
+		} else {
+			newWorkerName = workerName
+		}
+		m.reduceRunningTasks[newWorkerName] = filename
 	}
 	m.reduceTaskLock.Unlock()
-	return filename, workerName
+	return filename, newWorkerName
 }
 
 func (m *Master) returnReduceTask(workerName string) {
-
 	filename := m.reduceRunningTasks[workerName]
 	delete(m.reduceRunningTasks, workerName)
 	m.reduceTasks.PushBack(filename)
 
 }
 
+// assgin worker name to worker, make sure the name is unique for running map.
 func (m *Master) getWorkerName() string {
 	m.workerIndexLock.Lock()
 	defer m.workerIndexLock.Unlock()

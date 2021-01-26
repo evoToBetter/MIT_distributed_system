@@ -30,9 +30,9 @@ const (
 type TaskResult int
 
 const (
-	Done TaskResult = iota
+	Failed TaskResult = iota
 	Ongoing
-	Failed
+	Done
 )
 
 type GetTaskRequest struct {
