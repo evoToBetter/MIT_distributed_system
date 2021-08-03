@@ -1,4 +1,4 @@
-# impl problems or key point
+# implement problems or key point
 
 ## election restriction(paper 5.4.1)
 When leader election, need to make sure all the committed entries from previous terms are present on each new leader from the moment of its election.  

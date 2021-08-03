@@ -776,7 +776,9 @@ func TestFigure8Unreliable2C(t *testing.T) {
 
 	nup := servers
 	for iters := 0; iters < 1000; iters++ {
+		log.Printf("loop for figure 8: %v", iters)
 		if iters == 200 {
+			log.Printf("start set long reordering!")
 			cfg.setlongreordering(true)
 		}
 		leader := -1
